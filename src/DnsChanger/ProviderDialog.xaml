@@ -1,0 +1,59 @@
+<Window x:Class="DnsChanger.ProviderDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="DNS Entry" Height="420" Width="440"
+        WindowStartupLocation="CenterOwner" ResizeMode="NoResize"
+        WindowStyle="SingleBorderWindow"
+        Background="{StaticResource Bg}" Foreground="{StaticResource Text}"
+        FontFamily="Segoe UI">
+
+    <Grid Margin="26,22,26,22">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <TextBlock x:Name="HeaderText" Grid.Row="0" Text="Add DNS" FontSize="20" FontWeight="Bold" />
+
+        <StackPanel Grid.Row="1" Margin="0,18,0,0">
+            <TextBlock Text="NAME" FontSize="11" FontWeight="SemiBold" Foreground="{StaticResource TextDim}" />
+            <TextBox x:Name="NameBox" Style="{StaticResource InputBox}" Margin="0,6,0,0" />
+        </StackPanel>
+
+        <StackPanel Grid.Row="2" Margin="0,14,0,0">
+            <TextBlock Text="PRIMARY DNS" FontSize="11" FontWeight="SemiBold" Foreground="{StaticResource TextDim}" />
+            <TextBox x:Name="PrimaryBox" Style="{StaticResource InputBox}" Margin="0,6,0,0" />
+        </StackPanel>
+
+        <StackPanel Grid.Row="3" Margin="0,14,0,0">
+            <TextBlock Text="SECONDARY DNS (optional)" FontSize="11" FontWeight="SemiBold"
+                       Foreground="{StaticResource TextDim}" />
+            <TextBox x:Name="SecondaryBox" Style="{StaticResource InputBox}" Margin="0,6,0,0" />
+        </StackPanel>
+
+        <StackPanel Grid.Row="4" Margin="0,14,0,0">
+            <TextBlock Text="NOTE (optional)" FontSize="11" FontWeight="SemiBold"
+                       Foreground="{StaticResource TextDim}" />
+            <TextBox x:Name="NoteBox" Style="{StaticResource InputBox}" Margin="0,6,0,0" />
+        </StackPanel>
+
+        <TextBlock x:Name="ErrorText" Grid.Row="5" VerticalAlignment="Bottom" TextWrapping="Wrap"
+                   Foreground="{StaticResource Danger}" FontSize="12" Margin="0,12,0,0" />
+
+        <Grid Grid.Row="6" Margin="0,16,0,0">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="12" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+            <Button Grid.Column="0" Style="{StaticResource GhostButton}" Content="Cancel" Click="Cancel_Click" />
+            <Button Grid.Column="2" Style="{StaticResource PrimaryButton}" Height="40" Content="Save"
+                    Click="Save_Click" />
+        </Grid>
+    </Grid>
+</Window>

@@ -1,0 +1,1367 @@
+From ad4574e919423d70c4b7c191090421da2f0d5c2e Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Mon, 29 Jun 2026 08:15:28 +0000
+Subject: [PATCH] Add WPF DNS Changer app for Windows
+
+Implements a native Windows DNS changer (C#/WPF, .NET 8) with a modern
+dark UI:
+
+- One-click apply / reset (automatic-DHCP) of DNS per network adapter
+- Add, edit, delete unlimited custom DNS entries (persisted to %AppData%)
+- Search and live "current DNS" display per adapter
+- ~22 built-in presets (Cloudflare, Google, Quad9, OpenDNS, AdGuard,
+  Quad-family variants, plus Iranian anti-sanction providers like Shecan,
+  403.online, Electro, Begzar, etc.)
+- Runs elevated via app.manifest; changes applied through netsh + flushdns
+- GitHub Actions workflow builds a single-file win-x64 exe artifact
+
+Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01KqTjzrV42yE3FYjHzRSito
+---
+ .github/workflows/build.yml               |  41 ++++
+ .gitignore                                |  17 ++
+ DnsChanger.sln                            |  22 +++
+ README.md                                 |  88 ++++++++-
+ src/DnsChanger/App.xaml                   | 129 ++++++++++++
+ src/DnsChanger/App.xaml.cs                |   7 +
+ src/DnsChanger/Converters.cs              |  25 +++
+ src/DnsChanger/DnsChanger.csproj          |  23 +++
+ src/DnsChanger/MainWindow.xaml            | 231 ++++++++++++++++++++++
+ src/DnsChanger/MainWindow.xaml.cs         | 211 ++++++++++++++++++++
+ src/DnsChanger/Models/DnsProvider.cs      |  34 ++++
+ src/DnsChanger/ProviderDialog.xaml        |  59 ++++++
+ src/DnsChanger/ProviderDialog.xaml.cs     |  67 +++++++
+ src/DnsChanger/Services/DnsService.cs     | 137 +++++++++++++
+ src/DnsChanger/Services/StorageService.cs |  97 +++++++++
+ src/DnsChanger/app.manifest               |  28 +++
+ 16 files changed, 1214 insertions(+), 2 deletions(-)
+ create mode 100644 .github/workflows/build.yml
+ create mode 100644 .gitignore
+ create mode 100644 DnsChanger.sln
+ create mode 100644 src/DnsChanger/App.xaml
+ create mode 100644 src/DnsChanger/App.xaml.cs
+ create mode 100644 src/DnsChanger/Converters.cs
+ create mode 100644 src/DnsChanger/DnsChanger.csproj
+ create mode 100644 src/DnsChanger/MainWindow.xaml
+ create mode 100644 src/DnsChanger/MainWindow.xaml.cs
+ create mode 100644 src/DnsChanger/Models/DnsProvider.cs
+ create mode 100644 src/DnsChanger/ProviderDialog.xaml
+ create mode 100644 src/DnsChanger/ProviderDialog.xaml.cs
+ create mode 100644 src/DnsChanger/Services/DnsService.cs
+ create mode 100644 src/DnsChanger/Services/StorageService.cs
+ create mode 100644 src/DnsChanger/app.manifest
+
+diff --git a/.github/workflows/build.yml b/.github/workflows/build.yml
+new file mode 100644
+index 0000000..21454ec
+--- /dev/null
++++ b/.github/workflows/build.yml
+@@ -0,0 +1,41 @@
++name: Build
++
++on:
++  push:
++    branches: [main]
++  pull_request:
++  workflow_dispatch:
++
++jobs:
++  build:
++    runs-on: windows-latest
++
++    steps:
++      - uses: actions/checkout@v4
++
++      - name: Setup .NET
++        uses: actions/setup-dotnet@v4
++        with:
++          dotnet-version: 8.0.x
++
++      - name: Restore
++        run: dotnet restore DnsChanger.sln
++
++      - name: Build
++        run: dotnet build DnsChanger.sln -c Release --no-restore
++
++      - name: Publish single-file exe
++        run: >
++          dotnet publish src/DnsChanger/DnsChanger.csproj
++          -c Release
++          -r win-x64
++          --self-contained true
++          -p:PublishSingleFile=true
++          -p:IncludeNativeLibrariesForSelfExtract=true
++          -o publish
++
++      - name: Upload artifact
++        uses: actions/upload-artifact@v4
++        with:
++          name: DnsChanger-win-x64
++          path: publish/DnsChanger.exe
+diff --git a/.gitignore b/.gitignore
+new file mode 100644
+index 0000000..79170c5
+--- /dev/null
++++ b/.gitignore
+@@ -0,0 +1,17 @@
++# Build output
++bin/
++obj/
++publish/
++*.user
++
++# Visual Studio
++.vs/
++*.suo
++*.userprefs
++
++# Rider
++.idea/
++
++# OS
++Thumbs.db
++.DS_Store
+diff --git a/DnsChanger.sln b/DnsChanger.sln
+new file mode 100644
+index 0000000..8f77975
+--- /dev/null
++++ b/DnsChanger.sln
+@@ -0,0 +1,22 @@
++
++Microsoft Visual Studio Solution File, Format Version 12.00
++# Visual Studio Version 17
++VisualStudioVersion = 17.0.31903.59
++MinimumVisualStudioVersion = 10.0.40219.1
++Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DnsChanger", "src\DnsChanger\DnsChanger.csproj", "{B1A2C3D4-E5F6-47A8-9B0C-1D2E3F4A5B6C}"
++EndProject
++Global
++	GlobalSection(SolutionConfigurationPlatforms) = preSolution
++		Debug|Any CPU = Debug|Any CPU
++		Release|Any CPU = Release|Any CPU
++	EndGlobalSection
++	GlobalSection(ProjectConfigurationPlatforms) = postSolution
++		{B1A2C3D4-E5F6-47A8-9B0C-1D2E3F4A5B6C}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
++		{B1A2C3D4-E5F6-47A8-9B0C-1D2E3F4A5B6C}.Debug|Any CPU.Build.0 = Debug|Any CPU
++		{B1A2C3D4-E5F6-47A8-9B0C-1D2E3F4A5B6C}.Release|Any CPU.ActiveCfg = Release|Any CPU
++		{B1A2C3D4-E5F6-47A8-9B0C-1D2E3F4A5B6C}.Release|Any CPU.Build.0 = Release|Any CPU
++	EndGlobalSection
++	GlobalSection(SolutionProperties) = preSolution
++		HideSolutionNode = FALSE
++	EndGlobalSection
++EndGlobal
+diff --git a/README.md b/README.md
+index 64540d8..bc1ac91 100644
+--- a/README.md
++++ b/README.md
+@@ -1,2 +1,86 @@
+-# DNS-Changer
+-DNS Changer for windows
++# DNS Changer
++
++A simple, modern **DNS changer for Windows**. Pick a DNS provider, choose your
++network adapter, and switch with a single click — or reset back to automatic.
++
++Built with **C# / WPF (.NET 8)**. No browser, no bloat — a small native app.
++
++---
++
++## ✨ Features
++
++- **One-click apply** — set DNS on the selected adapter instantly.
++- **One-click reset** — return any adapter to automatic (DHCP) DNS.
++- **Add unlimited custom DNS** entries (name, primary, secondary, note).
++- **Edit / delete** your own entries; built-in presets stay protected.
++- **Search** across names and IP addresses.
++- **Lots of well-known providers built in** (see below).
++- **Per-adapter** control with live "current DNS" display.
++- Clean dark UI, custom entries persist in `%AppData%\DnsChanger\providers.json`.
++
++## 📦 Built-in providers
++
++**International:** Cloudflare (+ Malware / Family), Google Public DNS, Quad9,
++OpenDNS (+ Family Shield), AdGuard (+ Family), CleanBrowsing, Comodo Secure,
++Level3, DNS.WATCH, Yandex, Verisign.
++
++**Iran (anti-sanction / local):** Shecan, 403.online, Electro, Begzar,
++RadarGame, Shelter, Pishgaman.
++
++You can add any others you like from the app.
++
++## 🚀 Getting started
++
++### Download
++Grab the prebuilt `DnsChanger.exe` from the **Actions → Build** artifacts (or a
++release if published). It is a single self-contained file — no .NET install
++needed.
++
++> The app **requires administrator rights** (changing DNS does), so Windows will
++> prompt for elevation when you launch it.
++
++### Build from source
++Requires the [.NET 8 SDK](https://dotnet.microsoft.com/download) on Windows.
++
++```bash
++# Run it
++dotnet run --project src/DnsChanger
++
++# Or produce a single-file exe
++dotnet publish src/DnsChanger/DnsChanger.csproj -c Release -r win-x64 ^
++  --self-contained true -p:PublishSingleFile=true ^
++  -p:IncludeNativeLibrariesForSelfExtract=true -o publish
++```
++
++The exe will be at `publish/DnsChanger.exe`.
++
++## 🧭 How to use
++
++1. Launch the app (accept the admin prompt).
++2. Choose your **network adapter** at the top right (e.g. Wi-Fi or Ethernet).
++3. Pick a **DNS** from the list on the left.
++4. Click **Apply DNS**. To undo, click **Reset to Automatic**.
++5. To add your own, click **＋ Add** and fill in the address(es).
++
++## 🛠 How it works
++
++DNS changes are applied with Windows' built-in `netsh` command on the selected
++adapter, followed by a DNS cache flush (`ipconfig /flushdns`). Nothing is sent
++anywhere — it only configures your local network settings.
++
++## 📂 Project structure
++
++```
++src/DnsChanger/
++├─ Models/DnsProvider.cs       # the DNS entry model
++├─ Services/DnsService.cs      # reads/sets adapter DNS via netsh
++├─ Services/StorageService.cs  # presets + persistence of custom entries
++├─ MainWindow.xaml(.cs)        # main UI
++├─ ProviderDialog.xaml(.cs)    # add/edit dialog
++├─ App.xaml(.cs)               # theme & styles
++└─ app.manifest               # requests administrator elevation
++```
++
++## 📄 License
++
++MIT — see [LICENSE](LICENSE).
+diff --git a/src/DnsChanger/App.xaml b/src/DnsChanger/App.xaml
+new file mode 100644
+index 0000000..c21f67f
+--- /dev/null
++++ b/src/DnsChanger/App.xaml
+@@ -0,0 +1,129 @@
++<Application x:Class="DnsChanger.App"
++             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
++             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
++             xmlns:local="clr-namespace:DnsChanger"
++             StartupUri="MainWindow.xaml">
++    <Application.Resources>
++        <ResourceDictionary>
++
++            <!-- ===== Converters ===== -->
++            <local:BoolToVisibilityConverter x:Key="BoolToVis" />
++            <local:StringToVisibilityConverter x:Key="StrToVis" />
++
++            <!-- ===== Palette ===== -->
++            <Color x:Key="BgColor">#FF12141C</Color>
++            <Color x:Key="SurfaceColor">#FF1B1E2A</Color>
++            <Color x:Key="SurfaceColor2">#FF222636</Color>
++            <Color x:Key="AccentColor">#FF4F8CFF</Color>
++            <Color x:Key="AccentColor2">#FF6FE3C4</Color>
++
++            <SolidColorBrush x:Key="Bg" Color="{StaticResource BgColor}" />
++            <SolidColorBrush x:Key="Surface" Color="{StaticResource SurfaceColor}" />
++            <SolidColorBrush x:Key="Surface2" Color="{StaticResource SurfaceColor2}" />
++            <SolidColorBrush x:Key="Accent" Color="{StaticResource AccentColor}" />
++            <SolidColorBrush x:Key="AccentSoft" Color="#334F8CFF" />
++            <SolidColorBrush x:Key="Text" Color="#FFEDEFF7" />
++            <SolidColorBrush x:Key="TextDim" Color="#FF8A90A6" />
++            <SolidColorBrush x:Key="Danger" Color="#FFE0526B" />
++            <SolidColorBrush x:Key="Success" Color="#FF59D499" />
++            <SolidColorBrush x:Key="Border" Color="#FF2C3142" />
++
++            <LinearGradientBrush x:Key="AccentGradient" StartPoint="0,0" EndPoint="1,1">
++                <GradientStop Color="{StaticResource AccentColor}" Offset="0" />
++                <GradientStop Color="{StaticResource AccentColor2}" Offset="1" />
++            </LinearGradientBrush>
++
++            <!-- ===== Primary (accent) button ===== -->
++            <Style x:Key="PrimaryButton" TargetType="Button">
++                <Setter Property="Foreground" Value="White" />
++                <Setter Property="FontSize" Value="15" />
++                <Setter Property="FontWeight" Value="SemiBold" />
++                <Setter Property="Cursor" Value="Hand" />
++                <Setter Property="Height" Value="46" />
++                <Setter Property="Template">
++                    <Setter.Value>
++                        <ControlTemplate TargetType="Button">
++                            <Border x:Name="b" CornerRadius="12" Background="{StaticResource AccentGradient}">
++                                <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
++                            </Border>
++                            <ControlTemplate.Triggers>
++                                <Trigger Property="IsMouseOver" Value="True">
++                                    <Setter TargetName="b" Property="Opacity" Value="0.9" />
++                                </Trigger>
++                                <Trigger Property="IsPressed" Value="True">
++                                    <Setter TargetName="b" Property="Opacity" Value="0.75" />
++                                </Trigger>
++                                <Trigger Property="IsEnabled" Value="False">
++                                    <Setter TargetName="b" Property="Opacity" Value="0.4" />
++                                </Trigger>
++                            </ControlTemplate.Triggers>
++                        </ControlTemplate>
++                    </Setter.Value>
++                </Setter>
++            </Style>
++
++            <!-- ===== Secondary (outline) button ===== -->
++            <Style x:Key="GhostButton" TargetType="Button">
++                <Setter Property="Foreground" Value="{StaticResource Text}" />
++                <Setter Property="FontSize" Value="14" />
++                <Setter Property="Cursor" Value="Hand" />
++                <Setter Property="Height" Value="40" />
++                <Setter Property="Template">
++                    <Setter.Value>
++                        <ControlTemplate TargetType="Button">
++                            <Border x:Name="b" CornerRadius="10" Background="{StaticResource Surface2}"
++                                    BorderBrush="{StaticResource Border}" BorderThickness="1">
++                                <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
++                            </Border>
++                            <ControlTemplate.Triggers>
++                                <Trigger Property="IsMouseOver" Value="True">
++                                    <Setter TargetName="b" Property="Background" Value="#FF2B3046" />
++                                </Trigger>
++                                <Trigger Property="IsPressed" Value="True">
++                                    <Setter TargetName="b" Property="Opacity" Value="0.7" />
++                                </Trigger>
++                                <Trigger Property="IsEnabled" Value="False">
++                                    <Setter TargetName="b" Property="Opacity" Value="0.4" />
++                                </Trigger>
++                            </ControlTemplate.Triggers>
++                        </ControlTemplate>
++                    </Setter.Value>
++                </Setter>
++            </Style>
++
++            <!-- ===== Danger button ===== -->
++            <Style x:Key="DangerButton" TargetType="Button" BasedOn="{StaticResource GhostButton}">
++                <Setter Property="Foreground" Value="{StaticResource Danger}" />
++            </Style>
++
++            <!-- ===== TextBox ===== -->
++            <Style x:Key="InputBox" TargetType="TextBox">
++                <Setter Property="Foreground" Value="{StaticResource Text}" />
++                <Setter Property="CaretBrush" Value="{StaticResource Accent}" />
++                <Setter Property="FontSize" Value="14" />
++                <Setter Property="Height" Value="40" />
++                <Setter Property="VerticalContentAlignment" Value="Center" />
++                <Setter Property="Template">
++                    <Setter.Value>
++                        <ControlTemplate TargetType="TextBox">
++                            <Border CornerRadius="10" Background="{StaticResource Bg}"
++                                    BorderBrush="{StaticResource Border}" BorderThickness="1" Padding="12,0">
++                                <ScrollViewer x:Name="PART_ContentHost" VerticalAlignment="Center" />
++                            </Border>
++                        </ControlTemplate>
++                    </Setter.Value>
++                </Setter>
++            </Style>
++
++            <!-- ===== ComboBox (minimal) ===== -->
++            <Style x:Key="Combo" TargetType="ComboBox">
++                <Setter Property="Foreground" Value="{StaticResource Text}" />
++                <Setter Property="Background" Value="{StaticResource Bg}" />
++                <Setter Property="FontSize" Value="13" />
++                <Setter Property="Height" Value="38" />
++                <Setter Property="Padding" Value="10,0" />
++            </Style>
++
++        </ResourceDictionary>
++    </Application.Resources>
++</Application>
+diff --git a/src/DnsChanger/App.xaml.cs b/src/DnsChanger/App.xaml.cs
+new file mode 100644
+index 0000000..3af3f78
+--- /dev/null
++++ b/src/DnsChanger/App.xaml.cs
+@@ -0,0 +1,7 @@
++using System.Windows;
++
++namespace DnsChanger;
++
++public partial class App : Application
++{
++}
+diff --git a/src/DnsChanger/Converters.cs b/src/DnsChanger/Converters.cs
+new file mode 100644
+index 0000000..58b9135
+--- /dev/null
++++ b/src/DnsChanger/Converters.cs
+@@ -0,0 +1,25 @@
++using System.Globalization;
++using System.Windows;
++using System.Windows.Data;
++
++namespace DnsChanger;
++
++/// <summary>true =&gt; Visible, false =&gt; Collapsed.</summary>
++public class BoolToVisibilityConverter : IValueConverter
++{
++    public object Convert(object value, Type targetType, object parameter, CultureInfo culture)
++        => value is true ? Visibility.Visible : Visibility.Collapsed;
++
++    public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture)
++        => value is Visibility.Visible;
++}
++
++/// <summary>Non-empty string =&gt; Visible, empty/null =&gt; Collapsed.</summary>
++public class StringToVisibilityConverter : IValueConverter
++{
++    public object Convert(object value, Type targetType, object parameter, CultureInfo culture)
++        => string.IsNullOrWhiteSpace(value as string) ? Visibility.Collapsed : Visibility.Visible;
++
++    public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture)
++        => Binding.DoNothing;
++}
+diff --git a/src/DnsChanger/DnsChanger.csproj b/src/DnsChanger/DnsChanger.csproj
+new file mode 100644
+index 0000000..e910d0c
+--- /dev/null
++++ b/src/DnsChanger/DnsChanger.csproj
+@@ -0,0 +1,23 @@
++<Project Sdk="Microsoft.NET.Sdk">
++
++  <PropertyGroup>
++    <OutputType>WinExe</OutputType>
++    <TargetFramework>net8.0-windows</TargetFramework>
++    <Nullable>enable</Nullable>
++    <ImplicitUsings>enable</ImplicitUsings>
++    <UseWPF>true</UseWPF>
++    <ApplicationManifest>app.manifest</ApplicationManifest>
++    <AssemblyName>DnsChanger</AssemblyName>
++    <RootNamespace>DnsChanger</RootNamespace>
++    <Product>DNS Changer</Product>
++    <Version>1.0.0</Version>
++    <AssemblyVersion>1.0.0.0</AssemblyVersion>
++    <FileVersion>1.0.0.0</FileVersion>
++    <Authors>Mohammad Alemzadeh</Authors>
++    <Description>A simple, modern DNS changer for Windows.</Description>
++    <!-- Single-file friendly publish defaults -->
++    <SelfContained>false</SelfContained>
++    <RuntimeIdentifier Condition="'$(PublishSingleFile)' == 'true'">win-x64</RuntimeIdentifier>
++  </PropertyGroup>
++
++</Project>
+diff --git a/src/DnsChanger/MainWindow.xaml b/src/DnsChanger/MainWindow.xaml
+new file mode 100644
+index 0000000..c16769e
+--- /dev/null
++++ b/src/DnsChanger/MainWindow.xaml
+@@ -0,0 +1,231 @@
++<Window x:Class="DnsChanger.MainWindow"
++        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
++        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
++        Title="DNS Changer" Height="640" Width="940"
++        MinHeight="560" MinWidth="820"
++        WindowStartupLocation="CenterScreen"
++        Background="{StaticResource Bg}"
++        FontFamily="Segoe UI" Foreground="{StaticResource Text}">
++
++    <Grid Margin="0">
++        <Grid.ColumnDefinitions>
++            <ColumnDefinition Width="370" />
++            <ColumnDefinition Width="*" />
++        </Grid.ColumnDefinitions>
++
++        <!-- ============ LEFT: provider list ============ -->
++        <Border Grid.Column="0" Background="{StaticResource Surface}" BorderBrush="{StaticResource Border}"
++                BorderThickness="0,0,1,0">
++            <Grid Margin="18,20,18,18">
++                <Grid.RowDefinitions>
++                    <RowDefinition Height="Auto" />
++                    <RowDefinition Height="Auto" />
++                    <RowDefinition Height="*" />
++                    <RowDefinition Height="Auto" />
++                </Grid.RowDefinitions>
++
++                <TextBlock Grid.Row="0" Text="DNS Servers" FontSize="18" FontWeight="SemiBold" />
++
++                <!-- Search -->
++                <Border Grid.Row="1" Margin="0,14,0,12" CornerRadius="10" Background="{StaticResource Bg}"
++                        BorderBrush="{StaticResource Border}" BorderThickness="1" Height="40">
++                    <Grid>
++                        <Grid.ColumnDefinitions>
++                            <ColumnDefinition Width="Auto" />
++                            <ColumnDefinition Width="*" />
++                        </Grid.ColumnDefinitions>
++                        <TextBlock Grid.Column="0" Text="🔍" Margin="12,0,6,0" VerticalAlignment="Center"
++                                   Foreground="{StaticResource TextDim}" />
++                        <TextBox x:Name="SearchBox" Grid.Column="1" Background="Transparent" BorderThickness="0"
++                                 Foreground="{StaticResource Text}" CaretBrush="{StaticResource Accent}"
++                                 VerticalContentAlignment="Center" TextChanged="SearchBox_TextChanged" />
++                    </Grid>
++                </Border>
++
++                <!-- List -->
++                <ListBox x:Name="ProviderList" Grid.Row="2" Background="Transparent" BorderThickness="0"
++                         ScrollViewer.HorizontalScrollBarVisibility="Disabled"
++                         SelectionChanged="ProviderList_SelectionChanged"
++                         HorizontalContentAlignment="Stretch">
++                    <ListBox.ItemContainerStyle>
++                        <Style TargetType="ListBoxItem">
++                            <Setter Property="Margin" Value="0,0,0,8" />
++                            <Setter Property="Padding" Value="0" />
++                            <Setter Property="Template">
++                                <Setter.Value>
++                                    <ControlTemplate TargetType="ListBoxItem">
++                                        <Border x:Name="card" CornerRadius="12" Background="{StaticResource Surface2}"
++                                                BorderBrush="{StaticResource Border}" BorderThickness="1" Padding="14,11">
++                                            <ContentPresenter />
++                                        </Border>
++                                        <ControlTemplate.Triggers>
++                                            <Trigger Property="IsMouseOver" Value="True">
++                                                <Setter TargetName="card" Property="Background" Value="#FF272C40" />
++                                            </Trigger>
++                                            <Trigger Property="IsSelected" Value="True">
++                                                <Setter TargetName="card" Property="Background" Value="{StaticResource AccentSoft}" />
++                                                <Setter TargetName="card" Property="BorderBrush" Value="{StaticResource Accent}" />
++                                            </Trigger>
++                                        </ControlTemplate.Triggers>
++                                    </ControlTemplate>
++                                </Setter.Value>
++                            </Setter>
++                        </Style>
++                    </ListBox.ItemContainerStyle>
++                    <ListBox.ItemTemplate>
++                        <DataTemplate>
++                            <Grid>
++                                <Grid.ColumnDefinitions>
++                                    <ColumnDefinition Width="*" />
++                                    <ColumnDefinition Width="Auto" />
++                                </Grid.ColumnDefinitions>
++                                <StackPanel Grid.Column="0">
++                                    <StackPanel Orientation="Horizontal">
++                                        <TextBlock Text="{Binding Name}" FontSize="14.5" FontWeight="SemiBold" />
++                                        <Border Margin="8,1,0,0" CornerRadius="6" Background="#3359D499" Padding="6,1"
++                                                VerticalAlignment="Center"
++                                                Visibility="{Binding IsCustom, Converter={StaticResource BoolToVis}}">
++                                            <TextBlock Text="custom" FontSize="10" Foreground="{StaticResource Success}" />
++                                        </Border>
++                                    </StackPanel>
++                                    <TextBlock Text="{Binding DisplayServers}" FontSize="12.5"
++                                               Foreground="{StaticResource TextDim}" Margin="0,3,0,0" />
++                                    <TextBlock Text="{Binding Note}" FontSize="11" Foreground="{StaticResource Accent}"
++                                               Margin="0,2,0,0"
++                                               Visibility="{Binding Note, Converter={StaticResource StrToVis}}" />
++                                </StackPanel>
++                            </Grid>
++                        </DataTemplate>
++                    </ListBox.ItemTemplate>
++                </ListBox>
++
++                <!-- List actions -->
++                <Grid Grid.Row="3" Margin="0,12,0,0">
++                    <Grid.ColumnDefinitions>
++                        <ColumnDefinition Width="*" />
++                        <ColumnDefinition Width="8" />
++                        <ColumnDefinition Width="*" />
++                        <ColumnDefinition Width="8" />
++                        <ColumnDefinition Width="*" />
++                    </Grid.ColumnDefinitions>
++                    <Button Grid.Column="0" Style="{StaticResource GhostButton}" Content="＋ Add" Click="Add_Click" />
++                    <Button Grid.Column="2" Style="{StaticResource GhostButton}" Content="✎ Edit"
++                            Click="Edit_Click" x:Name="EditBtn" />
++                    <Button Grid.Column="4" Style="{StaticResource DangerButton}" Content="🗑 Delete"
++                            Click="Delete_Click" x:Name="DeleteBtn" />
++                </Grid>
++            </Grid>
++        </Border>
++
++        <!-- ============ RIGHT: details & actions ============ -->
++        <Grid Grid.Column="1" Margin="28,24,28,24">
++            <Grid.RowDefinitions>
++                <RowDefinition Height="Auto" />
++                <RowDefinition Height="Auto" />
++                <RowDefinition Height="*" />
++                <RowDefinition Height="Auto" />
++                <RowDefinition Height="Auto" />
++            </Grid.RowDefinitions>
++
++            <!-- Header -->
++            <StackPanel Grid.Row="0">
++                <TextBlock Text="DNS Changer" FontSize="26" FontWeight="Bold" />
++                <TextBlock Text="Pick a DNS, choose your adapter, and apply with one click."
++                           FontSize="13" Foreground="{StaticResource TextDim}" Margin="0,4,0,0" />
++            </StackPanel>
++
++            <!-- Adapter card -->
++            <Border Grid.Row="1" Margin="0,22,0,0" CornerRadius="14" Background="{StaticResource Surface}"
++                    BorderBrush="{StaticResource Border}" BorderThickness="1" Padding="18,16">
++                <Grid>
++                    <Grid.RowDefinitions>
++                        <RowDefinition Height="Auto" />
++                        <RowDefinition Height="Auto" />
++                    </Grid.RowDefinitions>
++                    <Grid.ColumnDefinitions>
++                        <ColumnDefinition Width="*" />
++                        <ColumnDefinition Width="Auto" />
++                    </Grid.ColumnDefinitions>
++
++                    <TextBlock Grid.Row="0" Grid.Column="0" Text="NETWORK ADAPTER" FontSize="11"
++                               FontWeight="SemiBold" Foreground="{StaticResource TextDim}" />
++                    <Button Grid.Row="0" Grid.Column="1" Content="⟳ Refresh" Style="{StaticResource GhostButton}"
++                            Height="28" Padding="10,0" FontSize="12" Click="Refresh_Click" />
++
++                    <ComboBox x:Name="AdapterBox" Grid.Row="1" Grid.ColumnSpan="2" Margin="0,10,0,0"
++                              Style="{StaticResource Combo}" DisplayMemberPath="Display"
++                              SelectionChanged="AdapterBox_SelectionChanged" />
++                </Grid>
++            </Border>
++
++            <!-- Selected provider detail -->
++            <Border Grid.Row="2" Margin="0,16,0,0" CornerRadius="14" Background="{StaticResource Surface}"
++                    BorderBrush="{StaticResource Border}" BorderThickness="1" Padding="22,20">
++                <Grid>
++                    <Grid.RowDefinitions>
++                        <RowDefinition Height="Auto" />
++                        <RowDefinition Height="*" />
++                        <RowDefinition Height="Auto" />
++                    </Grid.RowDefinitions>
++
++                    <StackPanel Grid.Row="0">
++                        <TextBlock Text="SELECTED DNS" FontSize="11" FontWeight="SemiBold"
++                                   Foreground="{StaticResource TextDim}" />
++                        <TextBlock x:Name="SelName" Text="—" FontSize="22" FontWeight="Bold" Margin="0,6,0,0" />
++                        <TextBlock x:Name="SelNote" Text="" FontSize="12" Foreground="{StaticResource Accent}"
++                                   Margin="0,2,0,0" />
++                    </StackPanel>
++
++                    <StackPanel Grid.Row="1" VerticalAlignment="Center" Margin="0,18">
++                        <Grid Margin="0,0,0,12">
++                            <Grid.ColumnDefinitions>
++                                <ColumnDefinition Width="120" />
++                                <ColumnDefinition Width="*" />
++                            </Grid.ColumnDefinitions>
++                            <TextBlock Grid.Column="0" Text="Primary" Foreground="{StaticResource TextDim}"
++                                       VerticalAlignment="Center" />
++                            <TextBlock x:Name="SelPrimary" Grid.Column="1" Text="—" FontSize="17"
++                                       FontFamily="Consolas" />
++                        </Grid>
++                        <Grid>
++                            <Grid.ColumnDefinitions>
++                                <ColumnDefinition Width="120" />
++                                <ColumnDefinition Width="*" />
++                            </Grid.ColumnDefinitions>
++                            <TextBlock Grid.Column="0" Text="Secondary" Foreground="{StaticResource TextDim}"
++                                       VerticalAlignment="Center" />
++                            <TextBlock x:Name="SelSecondary" Grid.Column="1" Text="—" FontSize="17"
++                                       FontFamily="Consolas" />
++                        </Grid>
++                    </StackPanel>
++
++                    <Grid Grid.Row="2">
++                        <Grid.ColumnDefinitions>
++                            <ColumnDefinition Width="*" />
++                            <ColumnDefinition Width="12" />
++                            <ColumnDefinition Width="220" />
++                        </Grid.ColumnDefinitions>
++                        <Button Grid.Column="0" x:Name="ApplyBtn" Style="{StaticResource PrimaryButton}"
++                                Content="Apply DNS" Click="Apply_Click" />
++                        <Button Grid.Column="2" Style="{StaticResource GhostButton}" Height="46"
++                                Content="Reset to Automatic" Click="Clear_Click" />
++                    </Grid>
++                </Grid>
++            </Border>
++
++            <!-- Status bar -->
++            <Border Grid.Row="3" Margin="0,16,0,0" CornerRadius="10" Background="{StaticResource Surface2}"
++                    BorderBrush="{StaticResource Border}" BorderThickness="1" Padding="14,10">
++                <StackPanel Orientation="Horizontal">
++                    <Ellipse x:Name="StatusDot" Width="9" Height="9" Fill="{StaticResource TextDim}"
++                             VerticalAlignment="Center" Margin="0,0,10,0" />
++                    <TextBlock x:Name="StatusText" Text="Ready." VerticalAlignment="Center"
++                               Foreground="{StaticResource TextDim}" FontSize="12.5" TextWrapping="Wrap" />
++                </StackPanel>
++            </Border>
++
++            <TextBlock Grid.Row="4" Margin="0,10,0,0" FontSize="11" Foreground="{StaticResource TextDim}"
++                       Text="Tip: run as administrator. Changes apply to the selected adapter only." />
++        </Grid>
++    </Grid>
++</Window>
+diff --git a/src/DnsChanger/MainWindow.xaml.cs b/src/DnsChanger/MainWindow.xaml.cs
+new file mode 100644
+index 0000000..acb0304
+--- /dev/null
++++ b/src/DnsChanger/MainWindow.xaml.cs
+@@ -0,0 +1,211 @@
++using System.Collections.ObjectModel;
++using System.Windows;
++using System.Windows.Controls;
++using System.Windows.Media;
++using DnsChanger.Models;
++using DnsChanger.Services;
++
++namespace DnsChanger;
++
++public partial class MainWindow : Window
++{
++    private readonly List<DnsProvider> _allProviders;
++    private readonly ObservableCollection<DnsProvider> _view = new();
++
++    public MainWindow()
++    {
++        InitializeComponent();
++
++        _allProviders = StorageService.Load();
++        ProviderList.ItemsSource = _view;
++        RefreshView();
++
++        LoadAdapters();
++        UpdateDetail(null);
++        UpdateActionButtons();
++    }
++
++    // ---------------- Adapters ----------------
++
++    private void LoadAdapters()
++    {
++        var selectedName = (AdapterBox.SelectedItem as NetworkAdapter)?.Name;
++        var adapters = DnsService.GetActiveAdapters();
++        AdapterBox.ItemsSource = adapters;
++
++        if (adapters.Count == 0)
++        {
++            SetStatus("No active network adapters found.", StatusKind.Warning);
++            return;
++        }
++
++        var restore = adapters.FirstOrDefault(a => a.Name == selectedName);
++        AdapterBox.SelectedItem = restore ?? adapters[0];
++    }
++
++    private void Refresh_Click(object sender, RoutedEventArgs e)
++    {
++        LoadAdapters();
++        SetStatus("Adapters refreshed.", StatusKind.Info);
++    }
++
++    private void AdapterBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
++    {
++        if (AdapterBox.SelectedItem is NetworkAdapter a)
++            SetStatus($"Current DNS on \"{a.Name}\": {a.CurrentDns}", StatusKind.Info);
++    }
++
++    // ---------------- Provider list ----------------
++
++    private void RefreshView()
++    {
++        var query = SearchBox?.Text?.Trim() ?? string.Empty;
++        var selected = ProviderList.SelectedItem as DnsProvider;
++
++        _view.Clear();
++        foreach (var p in _allProviders)
++        {
++            if (query.Length == 0 ||
++                p.Name.Contains(query, StringComparison.OrdinalIgnoreCase) ||
++                p.Primary.Contains(query, StringComparison.OrdinalIgnoreCase) ||
++                p.Secondary.Contains(query, StringComparison.OrdinalIgnoreCase))
++            {
++                _view.Add(p);
++            }
++        }
++
++        if (selected != null && _view.Contains(selected))
++            ProviderList.SelectedItem = selected;
++    }
++
++    private void SearchBox_TextChanged(object sender, TextChangedEventArgs e) => RefreshView();
++
++    private void ProviderList_SelectionChanged(object sender, SelectionChangedEventArgs e)
++    {
++        UpdateDetail(ProviderList.SelectedItem as DnsProvider);
++        UpdateActionButtons();
++    }
++
++    private void UpdateDetail(DnsProvider? p)
++    {
++        SelName.Text = p?.Name ?? "—";
++        SelNote.Text = p?.Note ?? string.Empty;
++        SelPrimary.Text = string.IsNullOrWhiteSpace(p?.Primary) ? "—" : p!.Primary;
++        SelSecondary.Text = string.IsNullOrWhiteSpace(p?.Secondary) ? "—" : p!.Secondary;
++        ApplyBtn.IsEnabled = p != null && AdapterBox.SelectedItem != null;
++    }
++
++    private void UpdateActionButtons()
++    {
++        bool isCustom = ProviderList.SelectedItem is DnsProvider { IsCustom: true };
++        EditBtn.IsEnabled = isCustom;
++        DeleteBtn.IsEnabled = isCustom;
++    }
++
++    // ---------------- Add / Edit / Delete ----------------
++
++    private void Add_Click(object sender, RoutedEventArgs e)
++    {
++        var dlg = new ProviderDialog { Owner = this };
++        if (dlg.ShowDialog() == true && dlg.Result != null)
++        {
++            dlg.Result.IsCustom = true;
++            _allProviders.Add(dlg.Result);
++            StorageService.Save(_allProviders);
++            RefreshView();
++            ProviderList.SelectedItem = dlg.Result;
++            SetStatus($"Added \"{dlg.Result.Name}\".", StatusKind.Success);
++        }
++    }
++
++    private void Edit_Click(object sender, RoutedEventArgs e)
++    {
++        if (ProviderList.SelectedItem is not DnsProvider { IsCustom: true } current)
++            return;
++
++        var dlg = new ProviderDialog(current) { Owner = this };
++        if (dlg.ShowDialog() == true && dlg.Result != null)
++        {
++            current.Name = dlg.Result.Name;
++            current.Primary = dlg.Result.Primary;
++            current.Secondary = dlg.Result.Secondary;
++            current.Note = dlg.Result.Note;
++            StorageService.Save(_allProviders);
++            RefreshView();
++            ProviderList.SelectedItem = current;
++            UpdateDetail(current);
++            SetStatus($"Updated \"{current.Name}\".", StatusKind.Success);
++        }
++    }
++
++    private void Delete_Click(object sender, RoutedEventArgs e)
++    {
++        if (ProviderList.SelectedItem is not DnsProvider { IsCustom: true } current)
++            return;
++
++        var confirm = MessageBox.Show(
++            $"Delete \"{current.Name}\"?", "DNS Changer",
++            MessageBoxButton.YesNo, MessageBoxImage.Question);
++
++        if (confirm == MessageBoxResult.Yes)
++        {
++            _allProviders.Remove(current);
++            StorageService.Save(_allProviders);
++            RefreshView();
++            UpdateDetail(ProviderList.SelectedItem as DnsProvider);
++            UpdateActionButtons();
++            SetStatus($"Deleted \"{current.Name}\".", StatusKind.Info);
++        }
++    }
++
++    // ---------------- Apply / Clear ----------------
++
++    private void Apply_Click(object sender, RoutedEventArgs e)
++    {
++        if (AdapterBox.SelectedItem is not NetworkAdapter adapter)
++        {
++            SetStatus("Select a network adapter first.", StatusKind.Warning);
++            return;
++        }
++        if (ProviderList.SelectedItem is not DnsProvider p)
++        {
++            SetStatus("Select a DNS provider first.", StatusKind.Warning);
++            return;
++        }
++
++        SetStatus($"Applying {p.Name}…", StatusKind.Info);
++        var result = DnsService.SetDns(adapter.Name, p.Primary, p.Secondary);
++        SetStatus(result.Message, result.Ok ? StatusKind.Success : StatusKind.Error);
++        LoadAdapters();
++    }
++
++    private void Clear_Click(object sender, RoutedEventArgs e)
++    {
++        if (AdapterBox.SelectedItem is not NetworkAdapter adapter)
++        {
++            SetStatus("Select a network adapter first.", StatusKind.Warning);
++            return;
++        }
++
++        SetStatus("Resetting DNS…", StatusKind.Info);
++        var result = DnsService.ClearDns(adapter.Name);
++        SetStatus(result.Message, result.Ok ? StatusKind.Success : StatusKind.Error);
++        LoadAdapters();
++    }
++
++    // ---------------- Status ----------------
++
++    private enum StatusKind { Info, Success, Warning, Error }
++
++    private void SetStatus(string message, StatusKind kind)
++    {
++        StatusText.Text = message;
++        StatusDot.Fill = kind switch
++        {
++            StatusKind.Success => (Brush)FindResource("Success"),
++            StatusKind.Error => (Brush)FindResource("Danger"),
++            StatusKind.Warning => Brushes.Goldenrod,
++            _ => (Brush)FindResource("Accent"),
++        };
++    }
++}
+diff --git a/src/DnsChanger/Models/DnsProvider.cs b/src/DnsChanger/Models/DnsProvider.cs
+new file mode 100644
+index 0000000..c988329
+--- /dev/null
++++ b/src/DnsChanger/Models/DnsProvider.cs
+@@ -0,0 +1,34 @@
++using System.Text.Json.Serialization;
++
++namespace DnsChanger.Models;
++
++/// <summary>
++/// A named DNS configuration (a primary and an optional secondary server).
++/// </summary>
++public class DnsProvider
++{
++    public string Name { get; set; } = string.Empty;
++
++    public string Primary { get; set; } = string.Empty;
++
++    public string Secondary { get; set; } = string.Empty;
++
++    /// <summary>True for user-added entries, false for the built-in presets.</summary>
++    public bool IsCustom { get; set; }
++
++    /// <summary>Optional short note shown in the UI (e.g. "Ad blocking").</summary>
++    public string Note { get; set; } = string.Empty;
++
++    [JsonIgnore]
++    public string DisplayServers =>
++        string.IsNullOrWhiteSpace(Secondary) ? Primary : $"{Primary}  •  {Secondary}";
++
++    public DnsProvider Clone() => new()
++    {
++        Name = Name,
++        Primary = Primary,
++        Secondary = Secondary,
++        IsCustom = IsCustom,
++        Note = Note,
++    };
++}
+diff --git a/src/DnsChanger/ProviderDialog.xaml b/src/DnsChanger/ProviderDialog.xaml
+new file mode 100644
+index 0000000..d02c996
+--- /dev/null
++++ b/src/DnsChanger/ProviderDialog.xaml
+@@ -0,0 +1,59 @@
++<Window x:Class="DnsChanger.ProviderDialog"
++        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
++        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
++        Title="DNS Entry" Height="420" Width="440"
++        WindowStartupLocation="CenterOwner" ResizeMode="NoResize"
++        WindowStyle="SingleBorderWindow"
++        Background="{StaticResource Bg}" Foreground="{StaticResource Text}"
++        FontFamily="Segoe UI">
++
++    <Grid Margin="26,22,26,22">
++        <Grid.RowDefinitions>
++            <RowDefinition Height="Auto" />
++            <RowDefinition Height="Auto" />
++            <RowDefinition Height="Auto" />
++            <RowDefinition Height="Auto" />
++            <RowDefinition Height="Auto" />
++            <RowDefinition Height="*" />
++            <RowDefinition Height="Auto" />
++        </Grid.RowDefinitions>
++
++        <TextBlock x:Name="HeaderText" Grid.Row="0" Text="Add DNS" FontSize="20" FontWeight="Bold" />
++
++        <StackPanel Grid.Row="1" Margin="0,18,0,0">
++            <TextBlock Text="NAME" FontSize="11" FontWeight="SemiBold" Foreground="{StaticResource TextDim}" />
++            <TextBox x:Name="NameBox" Style="{StaticResource InputBox}" Margin="0,6,0,0" />
++        </StackPanel>
++
++        <StackPanel Grid.Row="2" Margin="0,14,0,0">
++            <TextBlock Text="PRIMARY DNS" FontSize="11" FontWeight="SemiBold" Foreground="{StaticResource TextDim}" />
++            <TextBox x:Name="PrimaryBox" Style="{StaticResource InputBox}" Margin="0,6,0,0" />
++        </StackPanel>
++
++        <StackPanel Grid.Row="3" Margin="0,14,0,0">
++            <TextBlock Text="SECONDARY DNS (optional)" FontSize="11" FontWeight="SemiBold"
++                       Foreground="{StaticResource TextDim}" />
++            <TextBox x:Name="SecondaryBox" Style="{StaticResource InputBox}" Margin="0,6,0,0" />
++        </StackPanel>
++
++        <StackPanel Grid.Row="4" Margin="0,14,0,0">
++            <TextBlock Text="NOTE (optional)" FontSize="11" FontWeight="SemiBold"
++                       Foreground="{StaticResource TextDim}" />
++            <TextBox x:Name="NoteBox" Style="{StaticResource InputBox}" Margin="0,6,0,0" />
++        </StackPanel>
++
++        <TextBlock x:Name="ErrorText" Grid.Row="5" VerticalAlignment="Bottom" TextWrapping="Wrap"
++                   Foreground="{StaticResource Danger}" FontSize="12" Margin="0,12,0,0" />
++
++        <Grid Grid.Row="6" Margin="0,16,0,0">
++            <Grid.ColumnDefinitions>
++                <ColumnDefinition Width="*" />
++                <ColumnDefinition Width="12" />
++                <ColumnDefinition Width="*" />
++            </Grid.ColumnDefinitions>
++            <Button Grid.Column="0" Style="{StaticResource GhostButton}" Content="Cancel" Click="Cancel_Click" />
++            <Button Grid.Column="2" Style="{StaticResource PrimaryButton}" Height="40" Content="Save"
++                    Click="Save_Click" />
++        </Grid>
++    </Grid>
++</Window>
+diff --git a/src/DnsChanger/ProviderDialog.xaml.cs b/src/DnsChanger/ProviderDialog.xaml.cs
+new file mode 100644
+index 0000000..7919291
+--- /dev/null
++++ b/src/DnsChanger/ProviderDialog.xaml.cs
+@@ -0,0 +1,67 @@
++using System.Net;
++using System.Windows;
++using DnsChanger.Models;
++
++namespace DnsChanger;
++
++public partial class ProviderDialog : Window
++{
++    public DnsProvider? Result { get; private set; }
++
++    public ProviderDialog()
++    {
++        InitializeComponent();
++        HeaderText.Text = "Add DNS";
++        NameBox.Focus();
++    }
++
++    public ProviderDialog(DnsProvider existing) : this()
++    {
++        HeaderText.Text = "Edit DNS";
++        NameBox.Text = existing.Name;
++        PrimaryBox.Text = existing.Primary;
++        SecondaryBox.Text = existing.Secondary;
++        NoteBox.Text = existing.Note;
++    }
++
++    private void Save_Click(object sender, RoutedEventArgs e)
++    {
++        var name = NameBox.Text.Trim();
++        var primary = PrimaryBox.Text.Trim();
++        var secondary = SecondaryBox.Text.Trim();
++        var note = NoteBox.Text.Trim();
++
++        if (string.IsNullOrWhiteSpace(name))
++        {
++            ShowError("Please enter a name.");
++            return;
++        }
++        if (!IsValidIp(primary))
++        {
++            ShowError("Primary DNS must be a valid IPv4/IPv6 address.");
++            return;
++        }
++        if (!string.IsNullOrWhiteSpace(secondary) && !IsValidIp(secondary))
++        {
++            ShowError("Secondary DNS is not a valid address.");
++            return;
++        }
++
++        Result = new DnsProvider
++        {
++            Name = name,
++            Primary = primary,
++            Secondary = secondary,
++            Note = note,
++            IsCustom = true,
++        };
++        DialogResult = true;
++    }
++
++    private void Cancel_Click(object sender, RoutedEventArgs e) => DialogResult = false;
++
++    private static bool IsValidIp(string value) =>
++        IPAddress.TryParse(value, out _);
++
++    private void ShowError(string message) => ErrorText.Text = message;
++}
+diff --git a/src/DnsChanger/Services/DnsService.cs b/src/DnsChanger/Services/DnsService.cs
+new file mode 100644
+index 0000000..b0ff089
+--- /dev/null
++++ b/src/DnsChanger/Services/DnsService.cs
+@@ -0,0 +1,137 @@
++using System.Diagnostics;
++using System.Net.Sockets;
++using System.Net.NetworkInformation;
++using System.Text;
++
++namespace DnsChanger.Services;
++
++/// <summary>Information about a network adapter that can have its DNS changed.</summary>
++public class NetworkAdapter
++{
++    public string Name { get; init; } = string.Empty;          // friendly name used by netsh
++    public string Description { get; init; } = string.Empty;
++    public string CurrentDns { get; init; } = string.Empty;
++
++    public string Display => string.IsNullOrWhiteSpace(Description)
++        ? Name
++        : $"{Name}  ({Description})";
++}
++
++public record DnsResult(bool Ok, string Message);
++
++/// <summary>
++/// Reads and changes the DNS servers of Windows network adapters using netsh.
++/// Requires the process to run elevated (see app.manifest).
++/// </summary>
++public static class DnsService
++{
++    /// <summary>Returns the active (connected) IPv4 adapters.</summary>
++    public static List<NetworkAdapter> GetActiveAdapters()
++    {
++        var result = new List<NetworkAdapter>();
++
++        foreach (var ni in NetworkInterface.GetAllNetworkInterfaces())
++        {
++            if (ni.OperationalStatus != OperationalStatus.Up) continue;
++            if (ni.NetworkInterfaceType is NetworkInterfaceType.Loopback or NetworkInterfaceType.Tunnel)
++                continue;
++
++            var props = ni.GetIPProperties();
++
++            // Only list adapters that actually have an IPv4 configuration.
++            bool hasIpv4 = props.UnicastAddresses
++                .Any(a => a.Address.AddressFamily == AddressFamily.InterNetwork);
++            if (!hasIpv4) continue;
++
++            var dns = props.DnsAddresses
++                .Where(a => a.AddressFamily == AddressFamily.InterNetwork)
++                .Select(a => a.ToString())
++                .ToList();
++
++            result.Add(new NetworkAdapter
++            {
++                Name = ni.Name,
++                Description = ni.Description,
++                CurrentDns = dns.Count == 0 ? "Automatic (DHCP)" : string.Join(", ", dns),
++            });
++        }
++
++        return result;
++    }
++
++    /// <summary>Sets static DNS servers on the given adapter.</summary>
++    public static DnsResult SetDns(string adapter, string primary, string secondary)
++    {
++        if (string.IsNullOrWhiteSpace(primary))
++            return new DnsResult(false, "Primary DNS address is empty.");
++
++        var log = new StringBuilder();
++        bool ok = true;
++
++        var p = RunNetsh($"interface ipv4 set dnsservers name=\"{adapter}\" source=static address={primary} register=primary validate=no", log);
++        ok &= p;
++
++        if (ok && !string.IsNullOrWhiteSpace(secondary))
++        {
++            var s = RunNetsh($"interface ipv4 add dnsservers name=\"{adapter}\" address={secondary} index=2 validate=no", log);
++            ok &= s;
++        }
++
++        FlushDns(log);
++
++        return new DnsResult(ok,
++            ok ? $"DNS applied to \"{adapter}\"." : $"Failed to apply DNS.\n{log}");
++    }
++
++    /// <summary>Resets the adapter back to automatic (DHCP) DNS.</summary>
++    public static DnsResult ClearDns(string adapter)
++    {
++        var log = new StringBuilder();
++        var ok = RunNetsh($"interface ipv4 set dnsservers name=\"{adapter}\" source=dhcp", log);
++        FlushDns(log);
++
++        return new DnsResult(ok,
++            ok ? $"\"{adapter}\" reset to automatic (DHCP)." : $"Failed to reset DNS.\n{log}");
++    }
++
++    private static void FlushDns(StringBuilder log) => Run("ipconfig", "/flushdns", log);
++
++    private static bool RunNetsh(string args, StringBuilder log) => Run("netsh", args, log);
++
++    private static bool Run(string fileName, string arguments, StringBuilder log)
++    {
++        try
++        {
++            var psi = new ProcessStartInfo
++            {
++                FileName = fileName,
++                Arguments = arguments,
++                UseShellExecute = false,
++                RedirectStandardOutput = true,
++                RedirectStandardError = true,
++                CreateNoWindow = true,
++            };
++
++            using var proc = Process.Start(psi);
++            if (proc is null)
++            {
++                log.AppendLine($"Could not start {fileName}.");
++                return false;
++            }
++
++            string stdout = proc.StandardOutput.ReadToEnd();
++            string stderr = proc.StandardError.ReadToEnd();
++            proc.WaitForExit();
++
++            if (!string.IsNullOrWhiteSpace(stdout)) log.AppendLine(stdout.Trim());
++            if (!string.IsNullOrWhiteSpace(stderr)) log.AppendLine(stderr.Trim());
++
++            return proc.ExitCode == 0;
++        }
++        catch (Exception ex)
++        {
++            log.AppendLine(ex.Message);
++            return false;
++        }
++    }
++}
+diff --git a/src/DnsChanger/Services/StorageService.cs b/src/DnsChanger/Services/StorageService.cs
+new file mode 100644
+index 0000000..bf9afe6
+--- /dev/null
++++ b/src/DnsChanger/Services/StorageService.cs
+@@ -0,0 +1,97 @@
++using System.IO;
++using System.Text.Json;
++using DnsChanger.Models;
++
++namespace DnsChanger.Services;
++
++/// <summary>
++/// Loads and saves the list of DNS providers to %AppData%\DnsChanger\providers.json.
++/// On first run it seeds the file with the built-in presets.
++/// </summary>
++public static class StorageService
++{
++    private static readonly string Folder =
++        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "DnsChanger");
++
++    private static readonly string FilePath = Path.Combine(Folder, "providers.json");
++
++    private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
++
++    public static List<DnsProvider> Load()
++    {
++        try
++        {
++            if (File.Exists(FilePath))
++            {
++                var json = File.ReadAllText(FilePath);
++                var list = JsonSerializer.Deserialize<List<DnsProvider>>(json);
++                if (list is { Count: > 0 })
++                    return MergeWithDefaults(list);
++            }
++        }
++        catch
++        {
++            // Corrupt or unreadable file – fall back to defaults below.
++        }
++
++        var defaults = Defaults();
++        Save(defaults);
++        return defaults;
++    }
++
++    public static void Save(List<DnsProvider> providers)
++    {
++        try
++        {
++            Directory.CreateDirectory(Folder);
++            var json = JsonSerializer.Serialize(providers, JsonOptions);
++            File.WriteAllText(FilePath, json);
++        }
++        catch
++        {
++            // Saving is best-effort; ignore IO errors so the app keeps working.
++        }
++    }
++
++    /// <summary>
++    /// Keeps the user's custom entries and refreshes the built-in presets so new
++    /// app versions can ship additional well-known providers.
++    /// </summary>
++    private static List<DnsProvider> MergeWithDefaults(List<DnsProvider> saved)
++    {
++        var custom = saved.Where(p => p.IsCustom).ToList();
++        var merged = Defaults();
++        merged.AddRange(custom);
++        return merged;
++    }
++
++    /// <summary>The well-known DNS providers shipped with the app.</summary>
++    public static List<DnsProvider> Defaults() =>
++    [
++        // ---- International ----
++        new() { Name = "Cloudflare",                Primary = "1.1.1.1",        Secondary = "1.0.0.1",          Note = "Fast & private" },
++        new() { Name = "Cloudflare (Malware)",      Primary = "1.1.1.2",        Secondary = "1.0.0.2",          Note = "Blocks malware" },
++        new() { Name = "Cloudflare (Family)",       Primary = "1.1.1.3",        Secondary = "1.0.0.3",          Note = "Malware + adult" },
++        new() { Name = "Google Public DNS",         Primary = "8.8.8.8",        Secondary = "8.8.4.4",          Note = "Reliable" },
++        new() { Name = "Quad9",                     Primary = "9.9.9.9",        Secondary = "149.112.112.112",  Note = "Security focused" },
++        new() { Name = "OpenDNS",                   Primary = "208.67.222.222", Secondary = "208.67.220.220",   Note = "Cisco" },
++        new() { Name = "OpenDNS Family Shield",     Primary = "208.67.222.123", Secondary = "208.67.220.123",   Note = "Adult content filter" },
++        new() { Name = "AdGuard DNS",               Primary = "94.140.14.14",   Secondary = "94.140.15.15",     Note = "Ad blocking" },
++        new() { Name = "AdGuard Family",            Primary = "94.140.14.15",   Secondary = "94.140.15.16",     Note = "Ads + adult filter" },
++        new() { Name = "CleanBrowsing",             Primary = "185.228.168.9",  Secondary = "185.228.169.9",    Note = "Security filter" },
++        new() { Name = "Comodo Secure DNS",         Primary = "8.26.56.26",     Secondary = "8.20.247.20" },
++        new() { Name = "Level3",                    Primary = "4.2.2.4",        Secondary = "4.2.2.2" },
++        new() { Name = "DNS.WATCH",                 Primary = "84.200.69.80",   Secondary = "84.200.70.40",     Note = "No logging" },
++        new() { Name = "Yandex DNS",                Primary = "77.88.8.8",      Secondary = "77.88.8.1" },
++        new() { Name = "Verisign",                  Primary = "64.6.64.6",      Secondary = "64.6.65.6" },
++
++        // ---- Iran (anti-sanction / local) ----
++        new() { Name = "Shecan",                    Primary = "178.22.122.100", Secondary = "185.51.200.2",     Note = "Iran • anti-sanction" },
++        new() { Name = "403.online",               Primary = "10.202.10.202",  Secondary = "10.202.10.102",    Note = "Iran • anti-sanction" },
++        new() { Name = "Electro",                   Primary = "78.157.42.100",  Secondary = "78.157.42.101",    Note = "Iran • anti-sanction" },
++        new() { Name = "Begzar",                    Primary = "185.55.226.26",  Secondary = "185.55.225.25",    Note = "Iran • anti-sanction" },
++        new() { Name = "RadarGame",                 Primary = "10.202.10.10",   Secondary = "10.202.10.11",     Note = "Iran • gaming" },
++        new() { Name = "Shelter",                   Primary = "94.103.125.157", Secondary = "94.103.125.158",   Note = "Iran • anti-sanction" },
++        new() { Name = "Pishgaman",                 Primary = "5.202.100.100",  Secondary = "5.202.100.101",    Note = "Iran" },
++    ];
++}
+diff --git a/src/DnsChanger/app.manifest b/src/DnsChanger/app.manifest
+new file mode 100644
+index 0000000..6dd5dc3
+--- /dev/null
++++ b/src/DnsChanger/app.manifest
+@@ -0,0 +1,28 @@
++<?xml version="1.0" encoding="utf-8"?>
++<assembly manifestVersion="1.0" xmlns="urn:schemas-microsoft-com:asm.v1">
++  <assemblyIdentity version="1.0.0.0" name="DnsChanger.app" />
++
++  <!-- Changing DNS on network adapters requires administrator privileges. -->
++  <trustInfo xmlns="urn:schemas-microsoft-com:asm.v2">
++    <security>
++      <requestedPrivileges xmlns="urn:schemas-microsoft-com:asm.v3">
++        <requestedExecutionLevel level="requireAdministrator" uiAccess="false" />
++      </requestedPrivileges>
++    </security>
++  </trustInfo>
++
++  <!-- Per-monitor DPI awareness for a crisp UI on high-res displays -->
++  <application xmlns="urn:schemas-microsoft-com:asm.v3">
++    <windowsSettings>
++      <dpiAwareness xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">PerMonitorV2</dpiAwareness>
++      <dpiAware xmlns="http://schemas.microsoft.com/SMI/2005/WindowsSettings">true</dpiAware>
++    </windowsSettings>
++  </application>
++
++  <!-- Target Windows 10 / 11 -->
++  <compatibility xmlns="urn:schemas-microsoft-com:compatibility.v1">
++    <application>
++      <supportedOS Id="{8e0f7a12-bfb3-4fe8-b9a5-48fd50a15a9a}" />
++    </application>
++  </compatibility>
++</assembly>
+-- 
+2.43.0
+
