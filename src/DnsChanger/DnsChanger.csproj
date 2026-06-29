@@ -13,11 +13,19 @@
     <Version>1.0.0</Version>
     <AssemblyVersion>1.0.0.0</AssemblyVersion>
     <FileVersion>1.0.0.0</FileVersion>
+    <EnableDefaultApplicationDefinition>false</EnableDefaultApplicationDefinition>
     <Authors>Mohammad Alemzadeh</Authors>
     <Description>A simple, modern DNS changer for Windows.</Description>
     <!-- Single-file friendly publish defaults -->
     <SelfContained>false</SelfContained>
     <RuntimeIdentifier Condition="'$(PublishSingleFile)' == 'true'">win-x64</RuntimeIdentifier>
   </PropertyGroup>
+
+  <ItemGroup>
+    <ApplicationDefinition Include="App.xaml">
+      <Generator>MSBuild:Compile</Generator>
+      <SubType>Designer</SubType>
+    </ApplicationDefinition>
+  </ItemGroup>
 
 </Project>
